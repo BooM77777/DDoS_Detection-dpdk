@@ -1,0 +1,440 @@
+#include "stdio.h"
+#include "math.h"
+#include "util.h"
+#include "unistd.h"
+#include "stdbool.h"
+
+#include "rte_log.h"
+#include "rte_hash.h"
+#include "feature.h"
+
+#include "ddosDetectCore.h"
+#include "common.h"
+
+#define HISTORICAL_DATA_LEN 30
+
+int collectFeatures(struct DDoSDetectCoreConfig* config);
+void initialize_by_float(float* historicalData, int historicalDataLen, float normalVal, uint8_t type);
+void initialize_by_hash(float* historicalData, int historicalDataLen, struct rte_hash* normalIPList, uint8_t type);
+float* meanFilter(float* historicalData, int historicalDataLen, uint8_t kernalSize);
+void getBound(float* historicalData, int historicalDataLen, int smoothKernalSize, float* upperbound, float* lowerbound, uint8_t type);
+void updateHistoricalData(float* historicalData, int historicalDataLen, float* normalDataList, int normalDataNum, uint8_t type);
+float getTotalPayloadLengthEntropy();
+bool decetion_by_float(float* historicalData, int historicalDataLen, float normalVal, uint8_t type);
+bool decetion_by_hash(float* historicalData, int historicalDataLen, struct rte_hash* atkIPList, uint8_t type);
+
+struct rte_hash* createHashTable(){
+    return NULL;
+}
+
+
+int DDoSDetection(struct DDoSDetectCoreConfig* config){
+
+    return ddos_dectect_process(config);
+}
+
+int ddos_dectect_process(struct DDoSDetectCoreConfig* config){
+
+    printf("开启线程用于检测DDoS攻击");
+    // 用于遍历哈希表的值
+    uint32_t next;
+    uint32_t ret;
+    struct Key* key;
+    void* value;
+    // 用于记录窗口内是否发生DDoS攻击
+    bool flag = false;
+    // 记录每个窗口抓到了多少个IP的报文，用于判断该窗口检测目标是否为空
+    int ip_num;
+    // 记录窗口内总报数
+    float totalPktCnt = 0;
+    float* historical_totalPktCnt = malloc(HISTORICAL_DATA_LEN * sizeof(float));
+    // 记录窗口内总IP熵
+    float ipEntropy = 0;
+    float* historical_ipEntropy = malloc(HISTORICAL_DATA_LEN * sizeof(float));
+    // 记录每个IP的访问包数
+    struct rte_hash* pktCntByIP_hash = createHashTable();
+    if(pktCntByIP_hash == NULL){
+        printf("[ERROR] 记录每个IP的访问包数的哈希表创建失败\n");
+        return -1;
+    }
+    float* historical_ipPktCnt = malloc(HISTORICAL_DATA_LEN * sizeof(float));
+    // 记录每个IP的有效载荷长度熵
+    struct rte_hash* pktPayloadEntropyByIP_hash = createHashTable();
+    if(pktCntByIP_hash == NULL){
+        printf("[ERROR] 记录每个IP的有效载荷长度熵的哈希表创建失败\n");
+        return -1;
+    }
+    float* historical_ipPayloadEntropy = malloc(HISTORICAL_DATA_LEN * sizeof(float));
+
+    while (config->keepRunning){
+        sleep(config->detectionWinSize);
+
+        // 轮询收集抓包进程的特征信息
+        collectFeatures(config);
+
+        ip_num = rte_hash_count(config->featureTable);
+        printf("抓取到来自%u个不同IP的流量\n", ip_num);
+        if(ip_num == 0){
+            // 如果窗口内没有收到任何数据包，则跳过该窗口
+            continue;
+        }
+
+        // 清空所有的计数器与哈希表
+        totalPktCnt = 0;
+        ipEntropy = 0;
+
+        // 清空用于存贮每一个IP对应的报文个数的哈希表
+        for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(pktCntByIP_hash, &key, &value, &next)){
+            if(ret == -EINVAL){
+                printf("[ERROR] 参数错误\n");
+                break;
+            }
+            free(value);
+            value = NULL;
+        }
+        rte_hash_reset(pktCntByIP_hash);
+
+        // 清空用于存储每个IP的报文长度熵的哈希表
+        for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(pktPayloadEntropyByIP_hash, &key, &value, &next)){
+            if(ret == -EINVAL){
+                printf("[ERROR] 参数错误\n");
+                break;
+            }
+            free(value);
+            value = NULL;
+        }
+        rte_hash_reset(pktPayloadEntropyByIP_hash);
+
+        uint32_t* pktCntList = malloc(ip_num * sizeof(uint32_t));
+        int idx = 0;
+        
+        if(config->initializationProgress < HISTORICAL_DATA_LEN){
+            
+            int* tmp_int;
+            float* tmp_float;
+
+            printf("[DEBUG] 第 %d 次初始化\n", config->initializationProgress + 1);
+            // 遍历窗口内所有的值
+            for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(config->featureTable, &key, &value, &next)){
+                if(ret == -EINVAL){
+                    printf("[ERROR] 参数错误\n");
+                    break;
+                }
+                // 记录窗口内收到的总包数
+                totalPktCnt += ((struct Feature*)value)->pkt_cnt;
+                // 记录窗口内每个IP收到的总包数（列表形式，用于计算IP熵）
+                pktCntList[idx++] = ((struct Feature*)value)->pkt_cnt;
+                // 记录窗口内每个IP收到的总包数（哈希表形式，用于对每个IP进行检测）
+                tmp_int = malloc(sizeof(uint32_t));
+                *tmp_int = ((struct Feature*)value)->pkt_cnt;
+                rte_hash_add_key_data(pktCntByIP_hash, key, tmp_int);
+                // 计算窗口内每个IP的报文长度熵值（哈希表形式，用于对每个IP进行检测）
+                tmp_float = malloc(sizeof(float));
+                *tmp_float = getPayloadEntropy((struct Feature*)value);
+                rte_hash_add_key_data(pktPayloadEntropyByIP_hash, key, &tmp_float);
+            }
+            
+            ipEntropy = entropy(pktCntList, idx);   // 获取总的IP熵
+        
+            // 初始化窗口内总包数
+            initialize_by_float(historical_totalPktCnt, config->initializationProgress, (float)totalPktCnt, BOUND_TYPE_MAX);
+             // 初始化窗口内IP熵
+            initialize_by_float(historical_ipEntropy, config->initializationProgress, ipEntropy, BOUND_TYPE_MEAN);
+             // 初始化窗口内单个IP的报文个数
+            initialize_by_hash(historical_ipPktCnt, config->initializationProgress, pktCntByIP_hash, BOUND_TYPE_MAX);
+             // 初始化窗口内IP熵
+            initialize(historical_ipPayloadEntropy, config->initializationProgress, getTotalPayloadLengthEntropy(config), BOUND_TYPE_MEAN);
+            // 记录初始化轮数
+            config->initializationProgress++;
+
+            if(config->initializationProgress == HISTORICAL_DATA_LEN){
+
+                printf("初始化完成！");
+                float upperbound, lowerbound;
+                // 信息打印
+                getBound(historical_totalPktCnt, HISTORICAL_DATA_LEN, 3, &upperbound, &lowerbound, BOUND_TYPE_MAX);
+                printf("初始总请求个数阈值 = [%.4f, %.4f]\n", lowerbound, upperbound);
+                getBound(historical_ipEntropy, HISTORICAL_DATA_LEN, 3, &upperbound, &lowerbound, BOUND_TYPE_MEAN);
+                printf("初始初始IP熵阈值 = [%.4f, %.4f]\n", lowerbound, upperbound);
+                getBound(historical_ipPktCnt, HISTORICAL_DATA_LEN, 3, &upperbound, &lowerbound, BOUND_TYPE_MAX);
+                printf("初始每个IP报文个数阈值 = [%.4f, %.4f]\n", lowerbound, upperbound);
+                getBound(historical_ipPayloadEntropy, HISTORICAL_DATA_LEN, 3, &upperbound, &lowerbound, BOUND_TYPE_MEAN);
+                printf("初始每个IP报文长度上阈值 = [%.4f, %.4f]\n", lowerbound, upperbound);
+            }
+        }else{
+
+            printf("\n************** DDoS 攻击检测 **************\n");
+            // 遍历窗口内所有的值
+            for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(config->featureTable, &key, &value, &next)){
+                if(ret == -EINVAL){
+                    printf("[ERROR] 参数错误\n");
+                    break;
+                }
+                totalPktCnt += ((struct Feature*)value)->pkt_cnt;
+                pktCntList[idx++] = ((struct Feature*)value)->pkt_cnt;
+                rte_hash_add_key_data(pktCntByIP_hash, key, &(((struct Feature*)value)->pkt_cnt));
+            }
+            ipEntropy = entropy(pktCntList, idx);
+
+            flag = false;
+            // 攻击检测
+            // 优先检测窗口内总报文数与窗口内总IP熵
+            printf("服务器接收到总报文个数为 %u, 总IP熵为 %.4f\n", totalPktCnt, ipEntropy);
+            printf("窗口内总报文数阈值 : ");
+            flag = decetion_by_float(historical_totalPktCnt, HISTORICAL_DATA_LEN, totalPktCnt, BOUND_TYPE_MAX) || flag;
+            printf("窗口内IP熵阈值 : ");
+            flag = decetion_by_float(historical_ipEntropy, HISTORICAL_DATA_LEN, ipEntropy, BOUND_TYPE_MEAN) || flag;
+
+            if(!flag){
+
+                printf("窗口内没有出现DDoS攻击\n");
+            }else{
+
+                printf("窗口内疑似出现DDoS攻击\n");
+                printf("窗口内单个IP的报文数阈值 : ");
+                decetion_by_hash(historical_ipPktCnt, HISTORICAL_DATA_LEN, pktCntByIP_hash, BOUND_TYPE_MAX);
+                
+                ip_num = rte_hash_count(pktCntByIP_hash);
+
+                if(ip_num == 0){
+                    printf("窗口内没有出现DDoS攻击\n");
+                }else{
+                    printf("窗口内出现DDoS攻击，一共检测出 %u 个攻击IP，攻击IP如下 ： \n", ip_num);
+                    for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(pktCntByIP_hash, &key, &value, &next)){
+                        if(ret == -EINVAL){
+                            printf("[ERROR] 参数错误\n");
+                            break;
+                        }
+                        printf("\tIP = ");
+                        // display(*key);
+                        printf("\n");
+                        // printf("，单个窗口发送的包数为 %u，有效载荷长度熵值为 %.4f\n", value_uint32, iter->second);
+                    }
+                }
+            }
+        }
+        // 遍历feature_table删除所有的节点
+        for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(pktCntByIP_hash, &key, &value, &next)){
+            if(ret == -EINVAL){
+                printf("[ERROR] 参数错误\n");
+                break;
+            }
+            free(value);
+        }
+        rte_hash_reset(config->featureTable);
+    }
+    return 0;
+}
+
+int collectFeatures(struct DDoSDetectCoreConfig* config){
+    // 遍历所有的特征提取core，将相应的特征整合到自身特征库中
+    for(int i = 0; i < MAX_PC_CORE_NUM; i++){
+        if(config->pc_coreList[i] == NULL){
+            break;
+        }
+        updateFeatureFromCore(config, config->pc_coreList[i], config->atkType);
+    }
+    return 0;
+}
+
+void initialize_by_float(float* historicalData, int historicalDataLen, float normalVal, uint8_t type){
+
+    updateHistoricalData(historicalData, historicalDataLen + 1, &normalVal, 1, type);
+}
+
+void initialize_by_hash(float* historicalData, int historicalDataLen, struct rte_hash* normalIPList, uint8_t type){
+
+    uint32_t size = rte_hash_count(normalIPList);
+
+    if(size <= 0){
+        return;
+    }
+
+    float* normalFeatureList = malloc(size * sizeof(float));
+    int normalFeatureListSize = 0;
+
+    uint32_t next = 0;
+    uint32_t ret = 0;
+    uint32_t *key;
+    void* value = 0;
+    for(int i = 0; ret != ENOENT; ret != rte_hash_iterate(normalIPList, &key, &value, next), i++){
+        normalFeatureList[i] = *(float*)value;
+    }
+
+    updateHistoricalData(historicalData, ++historicalDataLen, normalFeatureList, normalFeatureListSize, type);
+}
+
+// 均值滤波（平滑用）
+float* meanFilter(float* historicalData, int historicalDataLen, uint8_t kernalSize){
+
+    float* res = malloc((historicalDataLen - kernalSize + 1) * sizeof(float));
+
+    for(int i = 0; i < historicalDataLen - kernalSize + 1; i++){
+        res[i] = 0;
+        for(int j = 0; j < kernalSize; j++){
+            res[i] += historicalData[i+j];
+        }
+        res[i] /= kernalSize;
+    }
+    return res;
+}
+
+// 获取区间上下界
+void getBound(float* historicalData, int historicalDataLen, int smoothKernalSize, float* upperbound, float* lowerbound, uint8_t type){
+
+    // 获取平滑后的
+    float* smoothRes = meanFilter(historicalData, historicalDataLen, smoothKernalSize);
+
+    float smoothRes_mean, smoothRes_std;
+    float max_delta;
+
+    switch (type){
+    case BOUND_TYPE_MEAN:   // 使用3σ准则计算
+
+        smoothRes_mean = mean(smoothRes, historicalDataLen - smoothKernalSize + 1);     // 求均值
+        smoothRes_std = stdDev(smoothRes, historicalDataLen - smoothKernalSize + 1);    // 求方差
+        *upperbound = smoothRes_mean + 3 * smoothRes_std;   // 区间上界
+        *lowerbound = smoothRes_mean - 3 * smoothRes_std;   // 区间下界
+        break;
+
+    case BOUND_TYPE_MAX:    // 使用区间最大值计算
+
+        *upperbound = historicalData[0];    // 初始化区间最大值
+        *lowerbound = historicalData[0];    // 初始化区间最小值
+        max_delta = historicalData[1] - historicalData[0];  // 初始化最大增幅，即相邻两个值的差
+
+        for(int i = 1; i < historicalDataLen; i++){
+            // 计算最大值
+            *upperbound = *upperbound >= historicalData[i] ? *upperbound : historicalData[i];
+            // 计算最小值
+            *lowerbound = *lowerbound <= historicalData[i] ? *lowerbound : historicalData[i];
+            // 计算最大幅度
+            max_delta = max_delta >= (historicalData[i] - historicalData[i-1]) ? max_delta : (historicalData[i] - historicalData[i-1]);
+        }
+        *upperbound += max_delta;
+        *lowerbound = -1;
+        break;
+    
+    default:
+        break;
+    }
+
+    free(smoothRes); // 清空无用内存
+}
+
+// 更新历史数据
+void updateHistoricalData(float* historicalData, int historicalDataLen, float* normalDataList, int normalDataNum, uint8_t type){
+
+    float valToBeUpdated;
+    switch (type)
+    {
+    case BOUND_TYPE_MEAN:
+        // 求均值
+        valToBeUpdated = mean(normalDataList, normalDataNum);
+        break;
+    case BOUND_TYPE_MAX:
+        // 求极值
+        valToBeUpdated = normalDataList[0];
+        for(int i = 1; i < normalDataNum; i++){
+            valToBeUpdated = valToBeUpdated >= normalDataList[i] ? valToBeUpdated : normalDataList[i];
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    for(int i = historicalDataLen - 2; i >= 0; i--){
+        historicalData[i+1] = historicalData[i];
+    }
+    historicalData[0] = valToBeUpdated;
+}
+
+// 计算所有报文的熵，用于报文长度熵的初始化
+float getTotalPayloadLengthEntropy(struct DDoSDetectCoreConfig* config){
+    
+    // 创建一个空的特征
+    struct Feature* tmpF = createEmptyFeature();
+
+    uint32_t ret, next;
+    struct Key* key = NULL;
+    struct Feature* value = NULL;
+    // 遍历Feature表中所有的特征
+    for(ret = 0, next = 0; ret != ENOENT; ret = rte_hash_iterate(config->featureTable, &key, &value, &next)){
+        if(ret == -EINVAL){
+            printf("[ERROR] 参数错误\n");
+            break;
+        }
+        // 将特征写入tmpF中
+        combineFeatures(value, tmpF);
+    }
+    // 计算熵值
+    float entropy = getPayloadEntropy(tmpF);
+    // 清空创建的空特征
+    free(tmpF);
+
+    return entropy;
+}
+
+// 检测单个值是否为异常值，用于检测窗口内是否存在DDoS攻击
+bool decetion_by_float(float* historicalData, int historicalDataLen, float normalVal, uint8_t type){
+
+    float upperbound, lowerbound;
+    // 获取阈值
+    getBound(historicalData, historicalDataLen, 3, &upperbound, &lowerbound, type);
+    // 显示一下边界
+    printf("[DEBUG] [ %.4f, %.4f ]\n", lowerbound, upperbound);
+
+    if(normalVal < lowerbound || normalVal > upperbound){
+        return true;
+    }else{
+        updateHistoricalData(historicalData, historicalDataLen, &normalVal, 1, type);
+        return false;
+    }
+}
+
+// 分别检测一个哈希表中所有的值是否为异常值，用于检测窗口内哪些IP可能存在DDoS攻击
+bool decetion_by_hash(float* historicalData, int historicalDataLen, struct rte_hash* atkIPList, uint8_t type){
+
+    int size = rte_hash_count(atkIPList);
+
+    float upperbound, lowerbound;
+
+    float* normalFeatureList = malloc(size * sizeof(float));
+    int normalFeatureListSize = 0;
+    
+    // 获取攻击检测的阈值上下界
+    getBound(historicalData, historicalDataLen, 3, &upperbound, &lowerbound, type);
+    // 打印一下
+    printf("[DEBUG] [ %.4f, %.4f ]\n", lowerbound, upperbound);
+    
+    uint32_t next = 0;
+    uint32_t ret = 0;
+    uint32_t *key;
+    void* value = 0;
+    for(int i = 0; ret != ENOENT; ret != rte_hash_iterate(atkIPList, &key, &value, next), i++){
+        if(ret == -EINVAL){
+            printf("[ERROR] 参数错误\n");
+            break;
+        }
+        if((*(float *)value) > upperbound || (*(float *)value) < lowerbound){
+            continue;
+        }else{
+            // 如果没有检测到攻击的话，就将它从哈希表中删除
+            // 这里不考虑free的问题，总是在检测的最后阶段去清空哈希表里面的每个元素
+            rte_hash_del_key(atkIPList, &key);
+            normalFeatureList[normalFeatureListSize++] = *(float *)value;
+        }
+    }
+
+    // 过滤没有正常流量的情况
+    if(normalFeatureListSize > 0){
+        updateHistoricalData(historicalData, historicalDataLen, normalFeatureList, normalFeatureListSize, type);
+    }
+
+    // 内存回收
+    free(normalFeatureList);
+
+    // 返回疑似攻击列表中是否还存在攻击
+    return rte_hash_count(atkIPList) > 0;
+}

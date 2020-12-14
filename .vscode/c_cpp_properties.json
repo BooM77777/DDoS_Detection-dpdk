@@ -1,0 +1,23 @@
+    {
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/src/*",
+                "/usr/local/dpdk/dpdk-stable-19.11.5/build/include"
+            ],
+            "compilerArgs": [
+                "-I/usr/local/dpdk/dpdk-stable-19.11.5/build/include",
+                "-L/usr/local/dpdk/dpdk-stable-19.11.5/build/lib",
+                "-ldpdk"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "gnu11",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
