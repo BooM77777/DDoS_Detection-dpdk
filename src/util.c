@@ -13,8 +13,8 @@ uint8_t* convertIPFromUint32(uint32_t ip) {
 
 
 void display(uint32_t srcIP, uint16_t srcPort, uint32_t dstIP, uint16_t dstPort, const char* proto) {
-	uint8_t* srcIP_display = convertIP(srcIP);
-	uint8_t* dstIP_display = convertIP(dstIP);
+	uint8_t* srcIP_display = convertIPFromUint32(srcIP);
+	uint8_t* dstIP_display = convertIPFromUint32(dstIP);
 	printf("%u.%u.%u.%u : %u", srcIP_display[0], srcIP_display[1], srcIP_display[2], srcIP_display[3], srcPort);
 	printf(" =*- %s -*=> ", proto);
 	printf("%u.%u.%u.%u : %u\n", dstIP_display[0], dstIP_display[1], dstIP_display[2], dstIP_display[3], dstPort);
@@ -77,3 +77,7 @@ float* meanFilter(float* historicalData, int historicalDataLen, uint8_t kernalSi
     }
     return res;
 }
+
+
+float min(float a, float b){return a > b ? b : a;}
+float max(float a, float b){return a > b ? a : b;}

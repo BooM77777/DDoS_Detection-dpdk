@@ -178,6 +178,9 @@ void WriteDebugInfoToLogFile(struct HistoricalData* historicalData, FILE* debugf
 
 int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
+
+	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于 HTTP GET 泛洪攻击检测\n", config->lcore);
+
     int ret;
     int i;
     uint8_t init_progress = 0; // 初始化进度，用于记录初始化的下标
@@ -202,8 +205,6 @@ int DDoSDetect(struct DDoSDetectCoreConfig* config){
     historicalData->pktCntPreIP = createContainer(MAX_INIT_PROGRESS);
 
     config->isRunning = true;
-
-	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于 HTTP GET 泛洪攻击检测\n", config->lcore);
 
     for(;;){
         

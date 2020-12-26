@@ -1,5 +1,6 @@
 #include "container.h"
 #include "stdlib.h"
+#include "util.h"
 
 #define FILTER_KERNEL 3
 
@@ -36,7 +37,7 @@ void getBound(struct Container* c, uint8_t type) {
         c->lowerBound = smoothRes_mean - 3 * smoothRes_std;   // 区间下界
         break;
 
-        case BOUND_TYPE_MAX:    // 使用区间最大值计算
+    case BOUND_TYPE_MAX:    // 使用区间最大值计算
 
         c->upperBound = c->data[0];    // 初始化区间最大值
         c->lowerBound = c->data[0];    // 初始化区间最小值

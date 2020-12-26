@@ -22,7 +22,7 @@ struct Feature* createFeature(uint16_t payload_len){
     return ret;
 }
 
-void combineFeatureWithLength(struct Feature* aim, uint16_t payload_len){
+void combineFeatureWithLength(struct Feature *aim, uint16_t payload_len){
 
     aim->pkt_cnt++;
     aim->payload_len_bin[payload_len / PAYLOAD_INTERVAL_SIZE]++;

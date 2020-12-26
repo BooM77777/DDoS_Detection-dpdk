@@ -16,4 +16,7 @@ void display(uint32_t, uint16_t, uint32_t, uint16_t, const char*);
 
 uint8_t* convertIPFromUint32(uint32_t ip);
 
+float min(float, float);
+float max(float, float);
+
 #endif

@@ -3,6 +3,7 @@
         "functional": "c",
         "memory": "c",
         "optional": "c",
-        "sstream": "c"
+        "sstream": "c",
+        "*.tcc": "c"
     }
 }

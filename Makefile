@@ -1,5 +1,5 @@
 ifeq ($(RTE_SDK),)
-	$(error "Please define RTE_SDK environment variable")
+$(error "Please define RTE_SDK environment variable")
 endif
 
 # Default target, can be overridden by command line or environment
@@ -11,8 +11,8 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP=dpdkcap
 
 # all source are stored in SRCS-y
-SRC_DIR = ./src
-SOURCES = main.c container.c ddosDetectCore.c feature.c featureExtractCore.c featureUpdateCore.c packetCaptureCore.c util.c feature.c
+SRC_DIR= src
+SOURCES = main.c container.c ddosDetectCore.c feature.c featureExtractCore.c featureUpdateCore.c packetCaptureCore.c util.c
 
 SRCS-y += $(addprefix $(SRC_DIR)/, $(SOURCES))
 

@@ -28,18 +28,19 @@ void updateFeatureFromHashToHash(struct rte_hash* src, struct rte_hash* dst){
 
 int FeatureUpdate(struct FeatureUpdateCoreConfig* config){
 
+	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于特征的转移\n", config->lcore);
+
     int i, j;
     struct rte_hash *src_hash_table, *dst_hash_table;
     uint8_t atk_type;
 
-    config->isRunning = true;
 
-	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于特征的转移\n", config->lcore);
+    config->isRunning = true;
 
     // 核心逻辑为，每过一段时间，将
     for(;;){
-        printf("hello world\n");
-        if(config->isRunning){
+
+        if(unlikely(!config->isRunning)) {
             break;
         }
 
