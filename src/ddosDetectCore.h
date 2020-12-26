@@ -5,6 +5,7 @@
 #include "packetCaptureCore.h"
 
 #include "rte_hash.h"
+#include "rte_log.h"
 
 #include "stdbool.h"
 
@@ -15,11 +16,15 @@ struct DDoSDetectCoreConfig{
     lcore_id lcore;
 
     uint8_t atkType;                // 用于标记攻击类型
+
+    const char* name;
+    const char* fileName_log;  // 用于存储受攻击IP的文件
+    const char* fileName_debug;   // 用于存储阈值的文件
+
     bool isRunning;               // 控制线程的关闭
     uint8_t detectionWinSize;       // 用于设置检测窗口大小
 
     struct rte_hash* featureTable; // 特征表
-    // uint8_t initializationProgress; // 初始化进度，用于记录初始化的下标
 };
 
 int DDoSDetect(struct DDoSDetectCoreConfig* config);

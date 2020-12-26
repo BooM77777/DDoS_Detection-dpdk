@@ -1,4 +1,5 @@
 #include "ddosDetectCore.h"
+#include "container.h"
 #include "feature.h"
 #include "util.h"
 
@@ -15,14 +16,99 @@ struct FeatureCollection{
     float total_pkt_len_entropy;            // 总报文长度熵
 
     uint32_t total_ip_cnt;                  // 总IP个数
+    uint32_t atk_ip_cnt;                    // 攻击IP个数
     uint32_t* ip_list;                      // IP列表
     uint32_t* pkt_cnt_pre_ip;               // 每个IP的报文个数
-    float* pkt_entropy_pre_ip;           // 每个IP的长度熵值
+    float* pkt_entropy_pre_ip;              // 每个IP的长度熵值
 
     uint8_t* vote_res;                      // 投票的结果
 };
 
-void collect_feature(struct DDoSDetectCoreConfig* config, struct FeatureCollection* feature_collection){
+struct HistoricalData{
+    /* data */
+    struct Container* totalPktCnt;
+    struct Container* ipEntropy;
+    struct Container* pktCntPreIP
+};
+
+bool detectionByTotalPktCnt(struct Container* c, struct FeatureCollection* featureCollection) {
+
+    getBound(c, BOUND_TYPE_MAX);
+    
+    return c->upperBound < featureCollection->total_pkt_cnt;
+}
+
+bool detectionByIPEntropy(struct Container* c, struct FeatureCollection* featureCollection) {
+
+    getBound(c, BOUND_TYPE_MEAN);
+
+    return featureCollection->total_ip_entropy < c->lowerBound || featureCollection->total_ip_entropy > c->upperBound;
+}
+
+bool detectionByPktCntPerIP(struct Container* c, struct FeatureCollection * featureCollection) {
+
+    bool ret = false;
+
+    getBound(c, BOUND_TYPE_MAX);
+
+    for(int i = 0; i < featureCollection->total_ip_cnt; i++) {
+        if(featureCollection->pkt_cnt_pre_ip[i] > c->upperBound) {
+            featureCollection->vote_res[i]++;
+            ret = true;
+        }
+    }
+
+    return ret;
+}
+
+bool attackDection(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+    
+    //检测是否存在疑似攻击检测
+    if(detectionByTotalPktCnt(historicalData->totalPktCnt, featureCollection) == false) {
+        if(detectionByTotalPktCnt(historicalData->ipEntropy, featureCollection) == false) {
+            return false;
+        }
+    }
+    
+    // 否则，窗口内存在DDoS攻击
+    return detectionByPktCntPerIP(historicalData->pktCntPreIP, featureCollection);
+}
+
+void updateHistoricalDataWithoutCheck(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+    
+    addDataToContainer(historicalData->totalPktCnt, featureCollection->total_pkt_cnt);
+
+    addDataToContainer(historicalData->ipEntropy,
+        entropy(featureCollection->pkt_cnt_pre_ip, featureCollection->total_ip_cnt));
+
+    addDataToContainer(historicalData->pktCntPreIP, 
+        mean(featureCollection->pkt_cnt_pre_ip, featureCollection->total_ip_cnt));
+}
+
+void updateHistoricalData(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+    
+    int totalPktCnt = 0;
+    
+    int total_ip_cnt = 0;
+    uint32_t* pkt_cnt_pre_ip = malloc(MAX_IP_PRE_WIN);
+
+    for(int i = 0; i < featureCollection->total_ip_cnt; i++) {
+        if(featureCollection->vote_res[i] == 0) {
+
+            totalPktCnt += featureCollection->pkt_cnt_pre_ip[i];
+
+            pkt_cnt_pre_ip[i] = featureCollection->pkt_cnt_pre_ip[i];
+            total_ip_cnt++;
+        }
+    }
+    addDataToContainer(historicalData->totalPktCnt, totalPktCnt);
+
+    addDataToContainer(historicalData->ipEntropy, entropy(pkt_cnt_pre_ip, total_ip_cnt));
+
+    addDataToContainer(historicalData->pktCntPreIP, mean(pkt_cnt_pre_ip, total_ip_cnt));
+}
+
+void collect_feature(struct DDoSDetectCoreConfig* config, struct FeatureCollection* feature_collection) {
 
     // 清空数据结构
     feature_collection->total_ip_cnt = 0;
@@ -61,20 +147,59 @@ void collect_feature(struct DDoSDetectCoreConfig* config, struct FeatureCollecti
         = entropy(feature_collection->total_pkt_len_distribution, PAYLOAD_INTERVAL_BIN_NUM);
 }
 
+void WriterResToLogFile(struct FeatureCollection* featureCollection, FILE* logfile) {
+
+    uint8_t* ip;
+
+    fprintf(logfile, "{atk_ip_cnt:%u, ", featureCollection->atk_ip_cnt);
+    fprintf(logfile, "atk_ip_list:[");
+    for(int i = 0; i < featureCollection->total_pkt_cnt; i++) {
+        if(featureCollection->vote_res[i] > 0) {
+            ip = convertIPFromUint32(featureCollection->ip_list[i]);
+            fprintf(logfile, "%s %u.%u.%u.%u", (i == 0 ? "" : ","), ip[0], ip[1], ip[2], ip[3]);
+        }
+    }
+    fprintf(logfile, ",]}\n");
+
+    fflush(logfile);
+}
+
+void WriteDebugInfoToLogFile(struct HistoricalData* historicalData, FILE* debugfile) {
+
+    fprintf(debugfile, "{total_pkt_cnt : {upperbound : %.6f}",
+        historicalData->totalPktCnt->upperBound);
+    fprintf(debugfile, "{ipEntropy : {upperbound : %.6f, lowerbound : %.6f}",
+        historicalData->ipEntropy->upperBound, historicalData->ipEntropy->lowerBound);
+    fprintf(debugfile, "pkt_cnt_per_ip : {upperbound : %.6f}}",
+        historicalData->pktCntPreIP->upperBound);
+
+    fflush(debugfile);
+}
+
 int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
     int ret;
     int i;
     uint8_t init_progress = 0; // 初始化进度，用于记录初始化的下标
 
+    FILE* debugfile = fopen(config->fileName_debug, 'w');
+    FILE* logfile = fopen(config->fileName_log, 'w');
+
+    // 用于存储特征的数据结构
     struct FeatureCollection* feature_collection = malloc(sizeof(struct FeatureCollection));
 
-    // 暂时只考虑同时接收65536个IP
     feature_collection->total_pkt_len_distribution = malloc(PAYLOAD_INTERVAL_BIN_NUM);
     feature_collection->ip_list = malloc(MAX_IP_PRE_WIN);
     feature_collection->pkt_cnt_pre_ip = malloc(MAX_IP_PRE_WIN);
     feature_collection->pkt_entropy_pre_ip = malloc(MAX_IP_PRE_WIN);
     feature_collection->vote_res = malloc(MAX_IP_PRE_WIN);
+
+    // 用于存储历史数据的数据结构
+    struct HistoricalData* historicalData = malloc(sizeof(struct HistoricalData));
+
+    historicalData->totalPktCnt = createContainer(MAX_INIT_PROGRESS);
+    historicalData->ipEntropy = createContainer(MAX_INIT_PROGRESS);
+    historicalData->pktCntPreIP = createContainer(MAX_INIT_PROGRESS);
 
     config->isRunning = true;
 
@@ -95,13 +220,27 @@ int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
         if(unlikely(init_progress < MAX_INIT_PROGRESS)){
             // 初始化
-            // init_seq();
+            init_progress++;
+            updateHistoricalDataWithOutCheck(feature_collection, historicalData);
         }else{
             // 攻击检测
+            if(attackDection(feature_collection, historicalData)){
+                RTE_LOG(INFO, DPDKCAP, "发现DDoS攻击，共有%d个攻击IP：\n", feature_collection->atk_ip_cnt);
+                for(int i = 0; i < feature_collection->total_ip_cnt; i++) {
+                    if(feature_collection->vote_res[i] > 0) {
+                        RTE_LOG(INFO, DPDKCAP, "\t%u.%u.%u.%u\n", convertIPFromUint32(feature_collection->ip_list[i]));
+                    }
+                }
 
+                WriteDebugInfoToLogFile(feature_collection, logfile);
+                WriteDebugInfoToLogFile(historicalData, debugfile);
+            }
+            updateHistoricalData(feature_collection, historicalData);
         }
-
     }
+
+    fclose(logfile);
+    fclose(debugfile);
 
     return 0;
 }

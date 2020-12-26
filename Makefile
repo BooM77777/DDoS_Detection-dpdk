@@ -12,11 +12,7 @@ APP=dpdkcap
 
 # all source are stored in SRCS-y
 SRC_DIR = ./src
-SOURCES = main.c ddosDetectCore.c featureExtractCore.c featureUpdateCore.c packetCaptureCore.c util.c feature.c
-# SOURCES = main.c $(wildcard ./$(SRC_DIR)/*.c)
-
-# debug:
-# 	@echo '$(addprefix $(SRC_DIR)/, $(SOURCES))'
+SOURCES = main.c container.c ddosDetectCore.c feature.c featureExtractCore.c featureUpdateCore.c packetCaptureCore.c util.c feature.c
 
 SRCS-y += $(addprefix $(SRC_DIR)/, $(SOURCES))
 

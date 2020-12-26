@@ -2,7 +2,7 @@
 #include "stdio.h"
 #include "math.h"
 
-uint8_t* convertIP(uint32_t ip) {
+uint8_t* convertIPFromUint32(uint32_t ip) {
 	uint8_t* ips = malloc(4 * sizeof(uint8_t));
 	ips[3] = ip & 0xff;
 	ips[2] = (ip >> 8) & 0xff;
@@ -62,4 +62,18 @@ float entropy(const uint32_t* list, uint32_t size){
 		}
 	}
 	return (double)res;
+}
+
+float* meanFilter(float* historicalData, int historicalDataLen, uint8_t kernalSize){
+
+    float* res = malloc((historicalDataLen - kernalSize + 1) * sizeof(float));
+
+    for(int i = 0; i < historicalDataLen - kernalSize + 1; i++){
+        res[i] = 0;
+        for(int j = 0; j < kernalSize; j++){
+            res[i] += historicalData[i+j];
+        }
+        res[i] /= kernalSize;
+    }
+    return res;
 }

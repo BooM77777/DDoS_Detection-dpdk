@@ -192,6 +192,9 @@ int init(int argc, char* argv[]){
     lcore_list[i++] = lcoreID;
     DDoS_detect_core_list[j] = malloc(sizeof(struct DDoSDetectCoreConfig));
 
+    DDoS_detect_core_list[j]->name = "HTTP GET FLOOD";
+    DDoS_detect_core_list[j]->fileName_log = "./../log/HTTP_GET_FLOOD.log";
+    DDoS_detect_core_list[j]->fileName_debug = "./../log/HTTP_GET_FLOOD.debug";
     DDoS_detect_core_list[j]->atkType = ATK_TYPE_HTTP_GET;
     DDoS_detect_core_list[j]->lcore = lcoreID;
     DDoS_detect_core_list[j]->featureTable = CreateFeatureTable("HTTP_GET_FEATURE_TABLE");
