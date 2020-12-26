@@ -88,6 +88,12 @@ int init(int argc, char* argv[]){
         if(ret){
             rte_exit(EXIT_FAILURE, "初始化 port 失败（portID = %d）\n", portID);
         }
+        ret = rte_eth_promiscuous_enable(portID);
+        if(ret == 0) {
+            RTE_LOG(INFO, DPDKCAP, "port %d 被设置为混杂模式\n", portID);
+        } else if(ret == -ENOTSUP) {
+            rte_exit(EXIT_FAILURE, "port %d 不支持混杂模式\n", portID);
+        }
         if(i >= nb_ports){
             break;
         }
@@ -220,13 +226,6 @@ int init(int argc, char* argv[]){
     featureUpdateCore->ddosDetectCoreList = DDoS_detect_core_list;
     featureUpdateCore->feature_update_win = 1;
     featureUpdateCore->pktNum_threshold = 1;
-
-    printf("这是为什么呢？ lcore = %d\n", lcoreID);
-    ret = rte_eal_remote_launch((lcore_function_t *)FeatureUpdate, featureUpdateCore, lcoreID);
-    printf("这是为什么呢? ret = %d\n", ret);
-    if(ret) {
-        rte_exit(EXIT_FAILURE, "[ERROR] 用于执行特征传递的 lcore %d 创建失败，程序退出。\n", lcoreID);
-    }
 
     return 0;
 }

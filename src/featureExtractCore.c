@@ -58,7 +58,7 @@ int process_http_pkt(
 }
 
 int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_mbuf** bufs, int pktCnt){
-    
+
 	struct rte_mbuf* pkt;
 
 	struct rte_ether_hdr* ether_hdr = NULL;
@@ -111,7 +111,7 @@ int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_
 				switch (dstPort){
 				// 考虑对一般HTTP服务的防护
 				case 80:
-					// display(srcIP, srcPort, dstIP, dstPort, "HTTP");
+					display(srcIP, srcPort, dstIP, dstPort, "HTTP");
 					process_http_pkt(config, srcIP, payload_len, application_layer_payload);
 					break;
 				case 443:
@@ -161,6 +161,7 @@ int FeatureExtract(struct FeatureExtractCoreConfig* config) {
 		}
 		// 从无锁队列中读取数据包
 		nb_pkt = rte_ring_dequeue_burst(config->ring, (void*)buffer, 8192, NULL);
+		// printf("%d\n", nb_pkt);
 		// 处理数据包
 		if(likely(nb_pkt > 0)){
 			feature_extract_process(config, buffer, nb_pkt);

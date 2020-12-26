@@ -179,17 +179,24 @@ void WriteDebugInfoToLogFile(struct HistoricalData* historicalData, FILE* debugf
 int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
 
-	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于 HTTP GET 泛洪攻击检测\n", config->lcore);
+	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于 %s 攻击检测\n", config->lcore, config->name);
 
     int ret;
     int i;
     uint8_t init_progress = 0; // 初始化进度，用于记录初始化的下标
-
-    FILE* debugfile = fopen(config->fileName_debug, 'w');
-    FILE* logfile = fopen(config->fileName_log, 'w');
+    
+    //printf("222");
+    //FILE* debugfile = fopen(config->fileName_debug, 'wb');
+    // printf("111");
+    //FILE* logfile = fopen("./HTTP_GET_FLOOD.log", "wb");
+    // printf("222");
+    
 
     // 用于存储特征的数据结构
     struct FeatureCollection* feature_collection = malloc(sizeof(struct FeatureCollection));
+    if(feature_collection == NULL) {
+        rte_exit(EXIT_FAILURE, "featurecollection 创建失败!\n");
+    }
 
     feature_collection->total_pkt_len_distribution = malloc(PAYLOAD_INTERVAL_BIN_NUM);
     feature_collection->ip_list = malloc(MAX_IP_PRE_WIN);
@@ -199,6 +206,9 @@ int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
     // 用于存储历史数据的数据结构
     struct HistoricalData* historicalData = malloc(sizeof(struct HistoricalData));
+    if(historicalData == NULL) {
+        rte_exit(EXIT_FAILURE, "historicalData 创建失败!\n");
+    }
 
     historicalData->totalPktCnt = createContainer(MAX_INIT_PROGRESS);
     historicalData->ipEntropy = createContainer(MAX_INIT_PROGRESS);
@@ -233,15 +243,15 @@ int DDoSDetect(struct DDoSDetectCoreConfig* config){
                     }
                 }
 
-                WriteDebugInfoToLogFile(feature_collection, logfile);
-                WriteDebugInfoToLogFile(historicalData, debugfile);
+                // WriterResToLogFile(feature_collection, logfile);
+                //WriteDebugInfoToLogFile(historicalData, debugfile);
             }
             updateHistoricalData(feature_collection, historicalData);
         }
     }
 
-    fclose(logfile);
-    fclose(debugfile);
+     //fclose(logfile);
+     //fclose(debugfile);
 
     return 0;
 }
