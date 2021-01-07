@@ -20,7 +20,7 @@ typedef uint16_t queue_id;
 #define NUMS_ATTACK_DETECTION_CORE_DEFAULT 1
 #define NUMS_FEATURE_EXTRACTION_CORE_DEFAULT 1
 
-#define DPDKCAP_CAPTURE_BURST_SIZE 256
+#define DPDKCAP_CAPTURE_BURST_SIZE 1024
 
 #define RX_DESC_DEFAULT 512
 
@@ -62,8 +62,5 @@ typedef uint16_t queue_id;
 
 // 特征提取相关参数
 #define POLLING_POLICY_THRESHOLD 1
-
-
-#include "feature.h"
 
 #endif

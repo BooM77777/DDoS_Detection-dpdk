@@ -1,6 +1,8 @@
 #include "featureExtractCore.h"
 #include "feature.h"
 
+#include "time.h"
+
 // 将特征更新到对应的哈希表中
 void update_feature(struct rte_hash* feature_table, uint32_t src_ip, uint16_t payload_len){
 
@@ -35,7 +37,7 @@ void update_feature(struct rte_hash* feature_table, uint32_t src_ip, uint16_t pa
 int process_http_pkt(
 	struct FeatureExtractCoreConfig* config, uint32_t src_ip, uint16_t http_payload_len,uint8_t* http_payload){
 
-	uint8_t atk_type = -1;
+	uint8_t atk_type = ATK_TYPE_TOTAL_NUM;
 	// 首先检测是否为 slow header 攻击，通过是否包含连续的两个 \r\n 来进行判断
 	char* find = strstr(http_payload, "\r\n\r\n");
 	if(find == NULL){
@@ -53,18 +55,23 @@ int process_http_pkt(
 			break;
 		default:
 			// 如果均不满足则说明是坏包但是，目前均不做处理
+			atk_type = -1;
 			break;
 		}
 	}
 
 	// 匹配到了关注的报文类型
-	if(atk_type != -1){
+	if(atk_type < ATK_TYPE_TOTAL_NUM){
 		update_feature(config->featureTableList[atk_type], src_ip, http_payload_len);
+		return 1;
+	} else {
+		return 0;
 	}
-	return 0;
 }
 
 int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_mbuf** bufs, int pktCnt){
+
+	int ret = 0;
 
 	struct rte_mbuf* pkt;
 
@@ -119,7 +126,8 @@ int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_
 				// 考虑对一般HTTP服务的防护
 				case 80:
 					// display(srcIP, srcPort, dstIP, dstPort, "HTTP");
-					process_http_pkt(config, srcIP, payload_len, application_layer_payload);
+					ret += process_http_pkt(config, srcIP, payload_len, application_layer_payload);
+					
 					break;
 				case 443:
 					// display(srcIP, srcPort, dstIP, dstPort, "SSL/TLS");
@@ -149,11 +157,15 @@ int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_
 			}
 		}
 	}
+
+	return ret;
 }
 
 int FeatureExtract(struct FeatureExtractCoreConfig* config) {
 
 	uint pktCnt = 0;
+	uint featureCnt = 0;
+
 	uint16_t nb_pkt;
     uint16_t nb_rx_enqueued;
     struct rte_mbuf *buffer[DPDKCAP_CAPTURE_BURST_SIZE];
@@ -162,21 +174,37 @@ int FeatureExtract(struct FeatureExtractCoreConfig* config) {
 
 	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于特征提取\n", config->lcore);
 
+	clock_t start,end; // 用来计时
+    start = clock();
+
 	for(;;){
-		
 		if(unlikely(!config->isRunning)){
 			break;
 		}
 		// 从无锁队列中读取数据包
 		nb_pkt = rte_ring_dequeue_burst(config->ring, (void*)buffer, 8192, NULL);
-		pktCnt += nb_pkt;
+		
 		// 处理数据包
 		if(likely(nb_pkt > 0)){
-			feature_extract_process(config, buffer, nb_pkt);
+
+			pktCnt += nb_pkt;
+			featureCnt += feature_extract_process(config, buffer, nb_pkt);
+
+			for(int i = 0; i < nb_pkt; i++){
+				rte_pktmbuf_free(buffer[i]);
+			}
+
+			// end = clock();
+			// if((double)(end-start)/CLOCKS_PER_SEC >=2) {
+			// 	printf("抓到了%d个数据包。一共提取了%d组特征\n", pktCnt, featureCnt);
+			// 	pktCnt = 0;
+			// 	featureCnt = 0;
+			// 	start = end;
+			// }
 		}
     }
-
-	RTE_LOG(INFO, DPDKCAP, "一共对 %d 个数据包进行特征提取\n", pktCnt);
+	
+	RTE_LOG(INFO, DPDKCAP, "一共对 %d 个数据包进行特征提取\n", featureCnt);
 	RTE_LOG(INFO, DPDKCAP, "用于特征提取的 lcore %u 成功关闭\n", config->lcore);
 
 	return 0;

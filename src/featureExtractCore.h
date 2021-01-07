@@ -22,7 +22,6 @@ struct FeatureExtractCoreConfig{
 
     struct rte_ring* ring;
 
-
     uint64_t pktCnt;    // 用于存储处理了的数据包数量
 	// 特征列表
 	struct rte_hash** featureTableList;

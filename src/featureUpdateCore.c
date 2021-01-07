@@ -43,11 +43,14 @@ int FeatureUpdate(struct FeatureUpdateCoreConfig* config){
     struct rte_hash *src_hash_table, *dst_hash_table;
     uint8_t atk_type;
 
+    config->pktNum_threshold = 1;
 
     config->isRunning = true;
-
+    
     // 核心逻辑为，每过一段时间，将
     for(;;){
+
+        usleep(500000);
 
         if(unlikely(!config->isRunning)) {
             break;
@@ -65,9 +68,6 @@ int FeatureUpdate(struct FeatureUpdateCoreConfig* config){
 
                 // 当前特征提取核心没有提取到足够的特征，则跳过当前核心
                 // 这么设计的目的是为了减少特征转换核心的处理次数
-                // if(config->featureExtractCoreList[j]->pktCnt < config->pktNum_threshold){
-                //     continue;
-                // }
 
                 src_hash_table = config->featureExtractCoreList[j]->featureTableList[atk_type];
                 updateFeatureFromHashToHash(src_hash_table, dst_hash_table);

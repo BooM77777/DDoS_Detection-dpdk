@@ -18,7 +18,7 @@ struct FeatureCollection{
     uint32_t total_ip_cnt;                  // 总IP个数
     uint32_t atk_ip_cnt;                    // 攻击IP个数
     uint32_t* ip_list;                      // IP列表
-    uint32_t* pkt_cnt_pre_ip;               // 每个IP的报文个数
+    float* pkt_cnt_pre_ip;                  // 每个IP的报文个数
     float* pkt_entropy_pre_ip;              // 每个IP的长度熵值
 
     uint8_t* vote_res;                      // 投票的结果
@@ -110,6 +110,8 @@ static void updateHistoricalData(struct HistoricalData *historicalData, struct F
 
 static void collect_feature(struct DDoSDetectCoreConfig *config, struct FeatureCollection *feature_collection) {
     
+    int ret = 0;
+
     // 清空数据结构
     feature_collection->total_ip_cnt = 0;
     feature_collection->total_pkt_cnt = 0;
@@ -125,7 +127,7 @@ static void collect_feature(struct DDoSDetectCoreConfig *config, struct FeatureC
     struct Feature* f;
      // 遍历特征表哈希表
     uint32_t next = 0;
-    uint32_t ret = 0, find = 0;
+    uint32_t find = 0;
     int j;
 
     for(;;) {

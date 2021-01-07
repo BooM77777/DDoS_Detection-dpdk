@@ -15,16 +15,13 @@
 #include "featureUpdateCore.h"
 #include "ddosDetectCore.h"
 
+#include "feature.h"
 #include "common.h"
 
 #define	EXIT_FAILURE	1	/* Failing exit status.  */
 #define	EXIT_SUCCESS	0	/* Successful exit status.  */
 
 #define RTE_TEST_RX_DESC_DEFAULT 512
-static uint16_t nb_rxd = RTE_TEST_RX_DESC_DEFAULT;
-
-/* ethernet addresses of ports */
-static struct rte_ether_addr l2fwd_ports_eth_addr[RTE_MAX_ETHPORTS];
 
 #define NUM_MBUFS_DEFAULT 8192
 #define MBUF_CACHE_SIZE 256
@@ -178,26 +175,33 @@ static int init(int argc, char* argv[]){
         rte_exit(EXIT_FAILURE, "EAL 初始化失败\n");
     }
 
+    // 初始化 port
+    // 只需要 RECV_NB_PORTS 个用于数据包旁路的接收
+    int dev_count = rte_eth_dev_count_avail();   //  获取所有可用的端口数量
+    if(dev_count < PACKET_RECEIVE_PORTS_NUM){
+        rte_exit(EXIT_FAILURE, "[ERROR] 没有足够的port，需要%d个，实际拥有%d个，程序退出\n",
+            PACKET_RECEIVE_PORTS_NUM, dev_count);
+    }
+
+    dev_count = PACKET_RECEIVE_PORTS_NUM;
+
+    // 创建port列表
+    port_id* portList = malloc(sizeof(port_id) * dev_count);
+    memset(portList, -1, dev_count);
+    int nb_ports = 0;
+    for(i = 0; i < dev_count; i++) {
+        portList[nb_ports++] = i;
+    }
+    
+    RTE_LOG(INFO, DPDKCAP, "port : 需要%d个，实际拥有%d个\n",
+            PACKET_RECEIVE_PORTS_NUM, nb_ports);
+    RTE_LOG(INFO,DPDKCAP,"Using %u ports to listen on\n", nb_ports);
+
     // 初始化mbuf池
     struct rte_mempool* mbuf_pool = rte_pktmbuf_pool_create(
         "MBUF_POOL", NUM_MBUFS_DEFAULT, MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
     if (mbuf_pool == NULL)
         rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
-
-    // 初始化 port
-    // 只需要 RECV_NB_PORTS 个用于数据包旁路的接收
-    int nb_ports = rte_eth_dev_count_avail();   //  获取所有可用的端口数量
-    if(nb_ports < PACKET_RECEIVE_PORTS_NUM){
-        rte_exit(EXIT_FAILURE, "[ERROR] 没有足够的port，需要%d个，实际拥有%d个，程序退出\n",
-            PACKET_RECEIVE_PORTS_NUM, nb_ports);
-    }
-    RTE_LOG(INFO, DPDKCAP, "port : 需要%d个，实际拥有%d个\n",
-            PACKET_RECEIVE_PORTS_NUM, nb_ports);
-    nb_ports = PACKET_RECEIVE_PORTS_NUM;
-    port_id* portList = malloc(nb_ports * sizeof(port_id));
-    memset(portList, -1, nb_ports);
-
-    RTE_LOG(INFO,DPDKCAP,"Using %u ports to listen on\n", nb_ports);
 
     // 创建一个无锁队列用于对数据包进行暂存
     // TODO : 这个之后可以研究一下 socket_id 的问题，到底要怎么绑定比较好
@@ -219,7 +223,6 @@ static int init(int argc, char* argv[]){
     memset(lcore_list, -1, nb_lcores);
 
     i = 0;
-    queue_id queueIdx = 0;
     uint8_t lcoreID = rte_get_next_lcore(-1, 1, 0); // 获取第一个 worker lcore
 
     // 创建数据接收模块所需要的lcore
@@ -229,12 +232,9 @@ static int init(int argc, char* argv[]){
     j = 0;
     port_id portID;
 
-    RTE_ETH_FOREACH_DEV(portID) {
+    for(j = 0; j < nb_ports; j++) {
 
-        if(j >= nb_ports){
-            break;
-        }
-        portList[j++] = portID;
+        portID = portList[j];
 
         // 初始化并开启这个port
         printf("正在初始化 port %d ...\n", portID);
@@ -243,25 +243,24 @@ static int init(int argc, char* argv[]){
             rte_exit(EXIT_FAILURE, "Cannot init port %d\n", portID);
         }
 
-        for(int k = 0; i < PACKET_RECEIVE_LCORE_NUM; k++){
+        // TODO 这里理论上有点小问题，目前暂时不考虑多队列的问题
 
-            lcore_list[i++] = lcoreID;    // 记录 lcoreID
+        lcore_list[i++] = lcoreID;    // 记录 lcoreID
 
-            // 创建数据包抓取节点
-            packet_capture_core_list[j] = malloc(sizeof(struct PacketCaptureCoreConfig));
-            packet_capture_core_list[j]->lcore = lcoreID;
-            packet_capture_core_list[j]->port = portID;
-            packet_capture_core_list[j]->queue = k;
-            packet_capture_core_list[j]->ring = packet_capture_ring;
+        // 创建数据包抓取节点
+        packet_capture_core_list[j] = malloc(sizeof(struct PacketCaptureCoreConfig));
+        packet_capture_core_list[j]->lcore = lcoreID;
+        packet_capture_core_list[j]->port = portID;
+        packet_capture_core_list[j]->queue = 0;
+        packet_capture_core_list[j]->ring = packet_capture_ring;
 
-            // 开启这个lcore
-            ret = rte_eal_remote_launch((lcore_function_t *) PacketCapture, packet_capture_core_list[j], lcoreID); 
-            if (ret) {
-                rte_exit(EXIT_FAILURE, "[ERROR] lcore %d 创建失败，程序退出。\n", lcoreID);
-            }
-            
-            lcoreID = rte_get_next_lcore(lcoreID, 1, 0); // 获取第一个worker lcore
+        // 开启这个lcore
+        ret = rte_eal_remote_launch((lcore_function_t *) PacketCapture, packet_capture_core_list[j], lcoreID); 
+        if (ret) {
+            rte_exit(EXIT_FAILURE, "[ERROR] lcore %d 创建失败，程序退出。\n", lcoreID);
         }
+        
+        lcoreID = rte_get_next_lcore(lcoreID, SKIP_MASTER, 0); // 获取第一个worker lcore
 
         // 开启端口
         ret = rte_eth_dev_start(portID);    
@@ -307,7 +306,7 @@ static int init(int argc, char* argv[]){
         if (ret) {
             rte_exit(EXIT_FAILURE, "[ERROR] lcore %d 创建失败，程序退出。\n", lcoreID);
         }
-        lcoreID = rte_get_next_lcore(lcoreID, 1, 0); // 获取第一个worker lcore
+        lcoreID = rte_get_next_lcore(lcoreID, SKIP_MASTER, 0); // 获取第一个worker lcore
     }
 
     // 创建用于攻击检测的core
@@ -332,7 +331,7 @@ static int init(int argc, char* argv[]){
     }
 
     j++;
-    lcoreID = rte_get_next_lcore(lcoreID, 1, 0);
+    lcoreID = rte_get_next_lcore(lcoreID, SKIP_MASTER, 0);
 
     // 创建特征传递核心
     lcore_list[i++] = lcoreID;

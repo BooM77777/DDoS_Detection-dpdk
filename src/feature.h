@@ -15,7 +15,7 @@ struct Key* getKey(uint32_t aimIP);
 struct Feature{
 
     uint pkt_cnt;           // 记录包个数
-    uint* payload_len_bin  // 记录有效载荷分布
+    uint* payload_len_bin;  // 记录有效载荷分布
 };
 
 // 创建一个空的特征（所有特征都置0），用于替代构造函数
