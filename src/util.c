@@ -1,21 +1,24 @@
 #include "util.h"
 #include "stdio.h"
 #include "math.h"
+#include "stdlib.h"
 
-uint8_t* convertIPFromUint32(uint32_t ip) {
-	uint8_t* ips = malloc(4 * sizeof(uint8_t));
+char* convertIPFromUint32(uint32_t ip) {
+	uint8_t ips[4];
 	ips[3] = ip & 0xff;
 	ips[2] = (ip >> 8) & 0xff;
 	ips[1] = (ip >> 16) & 0xff;
 	ips[0] = (ip >> 24) & 0xff;
-	return ips;
+    char* buf = malloc(16);
+    snprintf(buf, 16, "%u.%u.%u.%u\0", ips[0], ips[1],ips[2], ips[3]);
+	return buf;
 }
 
 
 void display(uint32_t srcIP, uint16_t srcPort, uint32_t dstIP, uint16_t dstPort, const char* proto) {
 	uint8_t* srcIP_display = convertIPFromUint32(srcIP);
 	uint8_t* dstIP_display = convertIPFromUint32(dstIP);
-	printf("%u.%u.%u.%u : %u", srcIP_display[0], srcIP_display[1], srcIP_display[2], srcIP_display[3], srcPort);
+	printf("%s : %u", srcIP_display[0], srcIP_display[1], srcIP_display[2], srcIP_display[3], srcPort);
 	printf(" =*- %s -*=> ", proto);
 	printf("%u.%u.%u.%u : %u\n", dstIP_display[0], dstIP_display[1], dstIP_display[2], dstIP_display[3], dstPort);
 	free(srcIP_display);

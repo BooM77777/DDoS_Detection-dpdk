@@ -7,8 +7,9 @@ struct Key* getKey(uint32_t aimIP){
 }
 
 // 创建一个空的特征（所有特征都置0），用于替代构造函数
-struct Feature* createEmptyFeature(){
+struct Feature* createEmptyFeature(void){
     struct Feature* ret = (struct Feature*)malloc(sizeof(struct Feature));
+    ret->payload_len_bin = malloc(PAYLOAD_INTERVAL_BIN_NUM * sizeof(uint32_t));
     ret->pkt_cnt = 0;
     for(int i = 0; i < PAYLOAD_INTERVAL_BIN_NUM; i++){
         ret->payload_len_bin[i] = 0;
@@ -25,7 +26,8 @@ struct Feature* createFeature(uint16_t payload_len){
 void combineFeatureWithLength(struct Feature *aim, uint16_t payload_len){
 
     aim->pkt_cnt++;
-    aim->payload_len_bin[payload_len / PAYLOAD_INTERVAL_SIZE]++;
+    int landequmingzile = payload_len / PAYLOAD_INTERVAL_SIZE;
+    aim->payload_len_bin[landequmingzile < PAYLOAD_INTERVAL_BIN_NUM ? landequmingzile : PAYLOAD_INTERVAL_BIN_NUM - 1]++;
 }
 
 float getPayloadEntropy(const struct Feature* f){

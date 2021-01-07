@@ -26,32 +26,32 @@ struct FeatureCollection{
 
 struct HistoricalData{
     /* data */
-    struct Container* totalPktCnt;
-    struct Container* ipEntropy;
-    struct Container* pktCntPreIP
+    struct Container* container_totalPktCnt;
+    struct Container* container_ipEntropy;
+    struct Container* container_pktCntPreIP;
 };
 
-bool detectionByTotalPktCnt(struct Container* c, struct FeatureCollection* featureCollection) {
+static bool detectionByTotalPktCnt(struct Container* c, struct FeatureCollection* featureCollection) {
 
     getBound(c, BOUND_TYPE_MAX);
     
     return c->upperBound < featureCollection->total_pkt_cnt;
 }
 
-bool detectionByIPEntropy(struct Container* c, struct FeatureCollection* featureCollection) {
+static bool detectionByIPEntropy(struct Container* c, struct FeatureCollection* featureCollection) {
 
     getBound(c, BOUND_TYPE_MEAN);
 
     return featureCollection->total_ip_entropy < c->lowerBound || featureCollection->total_ip_entropy > c->upperBound;
 }
 
-bool detectionByPktCntPerIP(struct Container* c, struct FeatureCollection * featureCollection) {
+static bool detectionByPktCntPerIP(struct Container* c, struct FeatureCollection * featureCollection) {
 
     bool ret = false;
 
     getBound(c, BOUND_TYPE_MAX);
 
-    for(int i = 0; i < featureCollection->total_ip_cnt; i++) {
+    for(uint32_t i = 0; i < featureCollection->total_ip_cnt; i++) {
         if(featureCollection->pkt_cnt_pre_ip[i] > c->upperBound) {
             featureCollection->vote_res[i]++;
             ret = true;
@@ -61,31 +61,31 @@ bool detectionByPktCntPerIP(struct Container* c, struct FeatureCollection * feat
     return ret;
 }
 
-bool attackDection(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+static bool attackDection(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
     
     //检测是否存在疑似攻击检测
-    if(detectionByTotalPktCnt(historicalData->totalPktCnt, featureCollection) == false) {
-        if(detectionByTotalPktCnt(historicalData->ipEntropy, featureCollection) == false) {
+    if(detectionByTotalPktCnt(historicalData->container_totalPktCnt, featureCollection) == false) {
+        if(detectionByTotalPktCnt(historicalData->container_ipEntropy, featureCollection) == false) {
             return false;
         }
     }
     
     // 否则，窗口内存在DDoS攻击
-    return detectionByPktCntPerIP(historicalData->pktCntPreIP, featureCollection);
+    return detectionByPktCntPerIP(historicalData->container_pktCntPreIP, featureCollection);
 }
 
-void updateHistoricalDataWithoutCheck(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+static void updateHistoricalDataWithoutCheck(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
     
-    addDataToContainer(historicalData->totalPktCnt, featureCollection->total_pkt_cnt);
+    addDataToContainer(historicalData->container_totalPktCnt, featureCollection->total_pkt_cnt);
 
-    addDataToContainer(historicalData->ipEntropy,
+    addDataToContainer(historicalData->container_ipEntropy,
         entropy(featureCollection->pkt_cnt_pre_ip, featureCollection->total_ip_cnt));
 
-    addDataToContainer(historicalData->pktCntPreIP, 
+    addDataToContainer(historicalData->container_pktCntPreIP, 
         mean(featureCollection->pkt_cnt_pre_ip, featureCollection->total_ip_cnt));
 }
 
-void updateHistoricalData(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
+static void updateHistoricalData(struct HistoricalData *historicalData, struct FeatureCollection *featureCollection) {
     
     int totalPktCnt = 0;
     
@@ -101,15 +101,15 @@ void updateHistoricalData(struct HistoricalData *historicalData, struct FeatureC
             total_ip_cnt++;
         }
     }
-    addDataToContainer(historicalData->totalPktCnt, totalPktCnt);
+    addDataToContainer(historicalData->container_totalPktCnt, totalPktCnt);
 
-    addDataToContainer(historicalData->ipEntropy, entropy(pkt_cnt_pre_ip, total_ip_cnt));
+    addDataToContainer(historicalData->container_ipEntropy, entropy(pkt_cnt_pre_ip, total_ip_cnt));
 
-    addDataToContainer(historicalData->pktCntPreIP, mean(pkt_cnt_pre_ip, total_ip_cnt));
+    addDataToContainer(historicalData->container_pktCntPreIP, mean(pkt_cnt_pre_ip, total_ip_cnt));
 }
 
-void collect_feature(struct DDoSDetectCoreConfig* config, struct FeatureCollection* feature_collection) {
-
+static void collect_feature(struct DDoSDetectCoreConfig *config, struct FeatureCollection *feature_collection) {
+    
     // 清空数据结构
     feature_collection->total_ip_cnt = 0;
     feature_collection->total_pkt_cnt = 0;
@@ -123,31 +123,38 @@ void collect_feature(struct DDoSDetectCoreConfig* config, struct FeatureCollecti
 
     struct Key* k;
     struct Feature* f;
-    
      // 遍历特征表哈希表
     uint32_t next = 0;
     uint32_t ret = 0, find = 0;
     int j;
-    for(int i = 0; ret != ENOENT; ret != rte_hash_iterate(config->featureTable, &k, &f, next), i++){
 
+    for(;;) {
+        ret = rte_hash_iterate(config->featureTable, &k, &f, &next);
+        if(ret == -ENOENT) {
+            break;
+        }
+        
         feature_collection->total_pkt_cnt += f->pkt_cnt;
         for(j = 0; j < PAYLOAD_INTERVAL_BIN_NUM; j++){
             feature_collection->total_pkt_len_distribution[j] += f->payload_len_bin[j];
         }
 
-        feature_collection->ip_list = k->aimIP;
+        feature_collection->ip_list[feature_collection->total_ip_cnt] = k->aimIP;
         feature_collection->pkt_cnt_pre_ip[feature_collection->total_ip_cnt] = f->pkt_cnt;
         feature_collection->pkt_entropy_pre_ip[feature_collection->total_ip_cnt] = getPayloadEntropy(f);
         
         feature_collection->total_ip_cnt++;
     }
+
     feature_collection->total_ip_entropy
         = entropy(feature_collection->pkt_cnt_pre_ip, feature_collection->total_ip_cnt);
     feature_collection->total_pkt_len_entropy
         = entropy(feature_collection->total_pkt_len_distribution, PAYLOAD_INTERVAL_BIN_NUM);
+
+    rte_hash_reset(config->featureTable);
 }
 
-void WriterResToLogFile(struct FeatureCollection* featureCollection, FILE* logfile) {
+static void WriterResToLogFile(struct FeatureCollection* featureCollection, FILE* logfile) {
 
     uint8_t* ip;
 
@@ -164,32 +171,29 @@ void WriterResToLogFile(struct FeatureCollection* featureCollection, FILE* logfi
     fflush(logfile);
 }
 
-void WriteDebugInfoToLogFile(struct HistoricalData* historicalData, FILE* debugfile) {
+static void WriteDebugInfoToLogFile(struct HistoricalData* historicalData, FILE* debugfile) {
 
     fprintf(debugfile, "{total_pkt_cnt : {upperbound : %.6f}",
-        historicalData->totalPktCnt->upperBound);
+        historicalData->container_totalPktCnt->upperBound);
     fprintf(debugfile, "{ipEntropy : {upperbound : %.6f, lowerbound : %.6f}",
-        historicalData->ipEntropy->upperBound, historicalData->ipEntropy->lowerBound);
+        historicalData->container_ipEntropy->upperBound, historicalData->container_ipEntropy->lowerBound);
     fprintf(debugfile, "pkt_cnt_per_ip : {upperbound : %.6f}}",
-        historicalData->pktCntPreIP->upperBound);
+        historicalData->container_pktCntPreIP->upperBound);
 
     fflush(debugfile);
 }
 
 int DDoSDetect(struct DDoSDetectCoreConfig* config){
 
-
 	RTE_LOG(INFO, DPDKCAP, "lcore %u 用于 %s 攻击检测\n", config->lcore, config->name);
-
     int ret;
     int i;
     uint8_t init_progress = 0; // 初始化进度，用于记录初始化的下标
-    
-    //printf("222");
-    //FILE* debugfile = fopen(config->fileName_debug, 'wb');
-    // printf("111");
-    //FILE* logfile = fopen("./HTTP_GET_FLOOD.log", "wb");
-    // printf("222");
+    char* ip;
+
+
+    FILE* debugfile = fopen(config->fileName_debug, "wb");
+    FILE* logfile = fopen(config->fileName_log, "wb");
     
 
     // 用于存储特征的数据结构
@@ -210,43 +214,52 @@ int DDoSDetect(struct DDoSDetectCoreConfig* config){
         rte_exit(EXIT_FAILURE, "historicalData 创建失败!\n");
     }
 
-    historicalData->totalPktCnt = createContainer(MAX_INIT_PROGRESS);
-    historicalData->ipEntropy = createContainer(MAX_INIT_PROGRESS);
-    historicalData->pktCntPreIP = createContainer(MAX_INIT_PROGRESS);
+    historicalData->container_totalPktCnt = malloc(sizeof(struct Container));
+    initContainer(historicalData->container_totalPktCnt, MAX_INIT_PROGRESS);
+    historicalData->container_ipEntropy = malloc(sizeof(struct Container));
+    initContainer(historicalData->container_ipEntropy, MAX_INIT_PROGRESS);
+    historicalData->container_pktCntPreIP = malloc(sizeof(struct Container));
+    initContainer(historicalData->container_pktCntPreIP, MAX_INIT_PROGRESS);
 
     config->isRunning = true;
 
     for(;;){
-        
+
         // 结束条件
-        if(unlikely(config->isRunning)){
+        if(unlikely(!(config->isRunning))){
             break;
         }
+
         // 窗口延迟
         sleep(config->detectionWinSize);
-
         collect_feature(config, feature_collection);
         printf("一共收到了%d个IP的%d个数据包。\n",
             feature_collection->total_ip_cnt, feature_collection->total_pkt_cnt);
 
+        if(unlikely(feature_collection->total_ip_cnt <= 0)) {
+            continue;
+        }
+        
         if(unlikely(init_progress < MAX_INIT_PROGRESS)){
             // 初始化
             init_progress++;
-            updateHistoricalDataWithOutCheck(feature_collection, historicalData);
+            updateHistoricalDataWithoutCheck(historicalData, feature_collection);
+            
         }else{
             // 攻击检测
-            if(attackDection(feature_collection, historicalData)){
+            if(attackDection(historicalData, feature_collection)){
                 RTE_LOG(INFO, DPDKCAP, "发现DDoS攻击，共有%d个攻击IP：\n", feature_collection->atk_ip_cnt);
                 for(int i = 0; i < feature_collection->total_ip_cnt; i++) {
                     if(feature_collection->vote_res[i] > 0) {
-                        RTE_LOG(INFO, DPDKCAP, "\t%u.%u.%u.%u\n", convertIPFromUint32(feature_collection->ip_list[i]));
+                        ip = convertIPFromUint32(feature_collection->ip_list[i]);
+                        RTE_LOG(INFO, DPDKCAP, "\t%s\n", ip);
                     }
                 }
 
                 // WriterResToLogFile(feature_collection, logfile);
-                //WriteDebugInfoToLogFile(historicalData, debugfile);
+                // WriteDebugInfoToLogFile(historicalData, debugfile);
             }
-            updateHistoricalData(feature_collection, historicalData);
+            updateHistoricalData(historicalData, feature_collection);
         }
     }
 

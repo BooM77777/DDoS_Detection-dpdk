@@ -9,18 +9,25 @@ void update_feature(struct rte_hash* feature_table, uint32_t src_ip, uint16_t pa
 	k->aimIP = src_ip;
 
 	// 创建值
-	struct Feature* f;
+	struct Feature* f = NULL;
 
 	int ret = rte_hash_lookup_data(feature_table, k, &f);
 	if(ret == -ENOENT){
 		// 没有查询到值，创建新的特征并加入哈希表中
 		f = createFeature(payload_len);
-		rte_hash_add_key_data(feature_table, k, f);
+		if(f != NULL){
+			rte_hash_add_key_data(feature_table, k, f);
+		}
 	}else{
-		// 如果查询到了数值，对查询到指针的对应值进行修改
-		combineFeatureWithLength(f, payload_len);
-		// 清空之前创建的key
-		free(k);
+		if(f == NULL){
+			rte_exit(EXIT_FAILURE, "你应该知道这个错误在哪里\n");
+		} else {
+			// 如果查询到了数值，对查询到指针的对应值进行修改
+			combineFeatureWithLength(f, payload_len);
+			// 清空之前创建的key
+			free(k);
+			k = NULL;
+		}
 	}
 }
 
@@ -111,7 +118,7 @@ int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_
 				switch (dstPort){
 				// 考虑对一般HTTP服务的防护
 				case 80:
-					display(srcIP, srcPort, dstIP, dstPort, "HTTP");
+					// display(srcIP, srcPort, dstIP, dstPort, "HTTP");
 					process_http_pkt(config, srcIP, payload_len, application_layer_payload);
 					break;
 				case 443:
@@ -146,6 +153,7 @@ int feature_extract_process(struct FeatureExtractCoreConfig* config, struct rte_
 
 int FeatureExtract(struct FeatureExtractCoreConfig* config) {
 
+	uint pktCnt = 0;
 	uint16_t nb_pkt;
     uint16_t nb_rx_enqueued;
     struct rte_mbuf *buffer[DPDKCAP_CAPTURE_BURST_SIZE];
@@ -161,12 +169,15 @@ int FeatureExtract(struct FeatureExtractCoreConfig* config) {
 		}
 		// 从无锁队列中读取数据包
 		nb_pkt = rte_ring_dequeue_burst(config->ring, (void*)buffer, 8192, NULL);
-		// printf("%d\n", nb_pkt);
+		pktCnt += nb_pkt;
 		// 处理数据包
 		if(likely(nb_pkt > 0)){
 			feature_extract_process(config, buffer, nb_pkt);
 		}
     }
+
+	RTE_LOG(INFO, DPDKCAP, "一共对 %d 个数据包进行特征提取\n", pktCnt);
+	RTE_LOG(INFO, DPDKCAP, "用于特征提取的 lcore %u 成功关闭\n", config->lcore);
 
 	return 0;
 }

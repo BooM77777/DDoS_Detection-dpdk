@@ -10,7 +10,7 @@ struct Container {
     float upperBound, lowerBound;
 };
 
-struct Container* createContainer(int size);
+void initContainer(struct Container* c, int cap);
 
 void addDataToContainer(struct Container* q, float data);
 

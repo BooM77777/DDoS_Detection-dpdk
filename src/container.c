@@ -4,14 +4,12 @@
 
 #define FILTER_KERNEL 3
 
-struct Container* createContainer(int cap) {
+void initContainer(struct Container* c, int cap) {
 
-    struct Container* ret = malloc(sizeof(struct Container));
-    ret->data = malloc(cap);
-    memset(ret->data, 0, cap);
-    ret->cap = cap;
-
-    return ret;
+    c->tail = 0;
+    c->data = malloc(cap * sizeof(uint32_t));
+    memset(c->data, 0, cap);
+    c->cap = cap;
 }
 
 void addDataToContainer(struct Container* c, float data) {
@@ -45,7 +43,7 @@ void getBound(struct Container* c, uint8_t type) {
         max_increase_delta = c->data[1] - c->data[0];   // 初始化最大增幅
         max_decrease_delta = c->data[1] - c->data[0];   // 初始化最大减幅
 
-        for(int i = 1; i < c->cap; i++){
+        for(uint32_t i = 1; i < c->cap; i++){
             // 计算最大值
             c->upperBound = max(c->upperBound, c->data[i]);
             // 计算最小值

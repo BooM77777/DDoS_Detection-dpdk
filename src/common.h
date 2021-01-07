@@ -17,15 +17,12 @@ typedef uint16_t queue_id;
 #define FEATURE_HASH_HTTP_GET_FLOOD "Feature Hash Table of HTTP Get Flooding Attack"
 #define FEATURE_HASH_HTTP_POST_FLOOD "Feature Hash Table of HTTP Post Flooding Attack"
 
-#define NUMS_ATTACK_DETECTION_CORE_DEFAULT 0
+#define NUMS_ATTACK_DETECTION_CORE_DEFAULT 1
 #define NUMS_FEATURE_EXTRACTION_CORE_DEFAULT 1
 
 #define DPDKCAP_CAPTURE_BURST_SIZE 256
 
 #define RX_DESC_DEFAULT 512
-
-#define IPPROTO_TCP 6
-#define IPPROTO_UDP 17
 
 #include "rte_hash.h"
 #include "rte_jhash.h"
@@ -66,23 +63,6 @@ typedef uint16_t queue_id;
 // 特征提取相关参数
 #define POLLING_POLICY_THRESHOLD 1
 
-static struct rte_eth_conf port_conf_default = {
-	.rxmode = {
-		.split_hdr_size = 0,
-	},
-	.txmode = {
-		.mq_mode = ETH_MQ_TX_NONE,
-	},
-};
-
-// struct rte_hash_patameters feature_tabel_params = {
-//   .name = NULL,     // 哈希表表名
-//   .entries = 1024,  // 哈希表总条目数
-//   .key_len = sizeof(uint32_t),  // 键的长度
-//   .hash_func = rte_jhash,   // 使用的哈希算法
-//   .hash_func_init_val = 0,  //  哈希算法初始化参数
-//   .socket_id = rte_socket_id(),  // 绑定NUMA
-// };
 
 #include "feature.h"
 
